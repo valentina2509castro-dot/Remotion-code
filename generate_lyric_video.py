@@ -24,36 +24,44 @@ FONT_SIZE       = 64
 MAX_LINE_WIDTH  = 1680  # pixels before wrapping
 
 LYRICS = [
-    ("Qué caro estoy pagando",                          14.0,   23.0),
-    ("El haber traicionado",                            23.0,   32.0),
-    ("El amor que me daba, por una locura",             32.0,   41.5),
-    ("Qué estúpido fui",                                41.5,   50.0),
-    ("Ella fue una aventura",                           50.0,   57.0),
-    ("Tan solo un pasatiempo",                          57.0,   64.0),
-    ("Con arrepentimiento sincero, hoy vengo",          64.0,   72.0),
-    ("A pedirte perdón",                                72.0,   78.0),
-    ("De rodillas te pido, te ruego, te digo",          78.0,   86.0),
-    ("Que regreses conmigo, que no te he olvidado",     86.0,   94.0),
-    ("Que te extrañan mis manos, que muero de ganas",   94.0,  102.0),
-    ("Por volverte a besar",                           102.0,  110.0),
-    ("En las noches despierto gritando tu nombre",     110.0,  117.0),
-    ("Y me lleno de miedo al pensar que a otro hombre",117.0,  124.0),
-    ("Le estarás entregando tus besos, tu cuerpo",     124.0,  131.0),
-    ("No quiero ni pensar",                            131.0,  138.0),
-    ("De rodillas te pido",                            138.0,  145.0),
-    ("Ella fue una aventura",                          145.0,  152.0),
-    ("Tan solo un pasatiempo",                         152.0,  159.0),
-    ("Con arrepentimiento sincero, hoy vengo",         159.0,  166.0),
-    ("A pedirte perdón",                               166.0,  172.0),
-    ("De rodillas te pido, te ruego, te digo",         172.0,  177.5),
-    ("Que regreses conmigo, que no te he olvidado",    177.5,  183.0),
-    ("Que te extrañan mis manos, que muero de ganas",  183.0,  188.5),
-    ("Por volverte a besar",                           188.5,  194.0),
-    ("En las noches despierto gritando tu nombre",     194.0,  198.5),
-    ("Y me lleno de miedo al pensar que a otro hombre",198.5,  203.0),
-    ("Le estarás entregando tus besos, tu cuerpo",     203.0,  207.5),
-    ("No quiero ni pensar",                            207.5,  212.0),
-    ("De rodillas te pido",                            212.0,  216.0),
+    # Verso 1 (ancla intro: 14.85s)
+    ("Qué caro estoy pagando",                          14.85,  21.35),
+    ("El haber traicionado",                            21.35,  27.85),
+    ("El amor que me daba, por una locura",             27.85,  34.35),
+    ("Qué estúpido fui",                                34.35,  40.85),
+    # Pre-coro 1
+    ("Ella fue una aventura",                           40.85,  47.35),
+    ("Tan solo un pasatiempo",                          47.35,  53.85),
+    ("Con arrepentimiento sincero, hoy vengo",          53.85,  60.35),
+    ("A pedirte perdón",                                60.35,  66.82),
+    # Coro 1 (anclas exactas del cromograma: 66.82 / 74.75 / 82.69 / 96.00)
+    ("De rodillas te pido, te ruego, te digo",          66.82,  74.75),
+    ("Que regreses conmigo, que no te he olvidado",     74.75,  82.69),
+    ("Que te extrañan mis manos, que muero de ganas",   82.69,  89.35),
+    ("Por volverte a besar",                            89.35,  96.00),
+    # Puente 1 (96.00 - 118.78s)
+    ("En las noches despierto gritando tu nombre",      96.00, 101.70),
+    ("Y me lleno de miedo al pensar que a otro hombre",101.70, 107.40),
+    ("Le estarás entregando tus besos, tu cuerpo",     107.40, 113.10),
+    ("No quiero ni pensar",                            113.10, 118.78),
+    # Link (ancla cromograma: 135.17 - 141.82s)
+    ("De rodillas te pido",                            135.17, 141.82),
+    # Pre-coro 2 (141.82 - 169.98s)
+    ("Ella fue una aventura",                          141.82, 148.86),
+    ("Tan solo un pasatiempo",                         148.86, 155.90),
+    ("Con arrepentimiento sincero, hoy vengo",         155.90, 162.94),
+    ("A pedirte perdón",                               162.94, 169.98),
+    # Coro 2 (169.98 - 193.02s)
+    ("De rodillas te pido, te ruego, te digo",         169.98, 175.74),
+    ("Que regreses conmigo, que no te he olvidado",    175.74, 181.50),
+    ("Que te extrañan mis manos, que muero de ganas",  181.50, 187.26),
+    ("Por volverte a besar",                           187.26, 193.02),
+    # Outro (193.02 - 212.00s)
+    ("En las noches despierto gritando tu nombre",     193.02, 196.73),
+    ("Y me lleno de miedo al pensar que a otro hombre",196.73, 200.44),
+    ("Le estarás entregando tus besos, tu cuerpo",     200.44, 204.15),
+    ("No quiero ni pensar",                            204.15, 207.87),
+    ("De rodillas te pido",                            207.87, 212.00),
 ]
 
 
