@@ -1,6 +1,7 @@
 import React from "react";
 import { Composition } from "remotion";
 import { DynamicComp } from "./DynamicComp";
+import { LyricVideo } from "./LyricVideo";
 
 const defaultCode = `import { AbsoluteFill } from "remotion";
 export const MyAnimation = () => <AbsoluteFill style={{ backgroundColor: "#000" }} />;`;
@@ -20,6 +21,14 @@ export const RemotionRoot: React.FC = () => {
           durationInFrames: props.durationInFrames as number,
           fps: props.fps as number,
         })}
+      />
+      <Composition
+        id="DeRodillasTeVideo"
+        component={LyricVideo}
+        durationInFrames={6480}
+        fps={30}
+        width={1920}
+        height={1080}
       />
     </>
   );
