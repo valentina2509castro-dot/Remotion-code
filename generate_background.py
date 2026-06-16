@@ -1,359 +1,314 @@
 #!/usr/bin/env python3
 """
-Fondo cinemático regional mexicano — hora dorada, parallax, sin look de videojuego.
-Siluetas orgánicas, textura de ruido, grano de película, perspectiva atmosférica.
+Fondo fotorrealista — desierto Sonorense, atardecer dorado.
+Terreno fractal con sombreado de pendiente, perspectiva atmosférica,
+grano de película, movimiento de cámara sutil.
 """
-import math, io, subprocess, sys, random
+import math, io, subprocess, sys
 import numpy as np
-from PIL import Image, ImageDraw, ImageFilter, ImageEnhance, ImageChops
+from PIL import Image, ImageDraw, ImageFilter, ImageEnhance
 
-FFMPEG  = "/home/user/Remotion-code/node_modules/@remotion/compositor-linux-x64-gnu/ffmpeg"
-OUTPUT  = "/home/user/Remotion-code/public/fondo_regional.mp4"
-W, H    = 1920, 1080
-FPS     = 30
-DUR     = 20
-FRAMES  = FPS * DUR
+FFMPEG = "/home/user/Remotion-code/node_modules/@remotion/compositor-linux-x64-gnu/ffmpeg"
+OUTPUT = "/home/user/Remotion-code/public/fondo_regional.mp4"
+W, H   = 1920, 1080
+FPS    = 30
+DUR    = 20
+FRAMES = FPS * DUR
 
-HORIZON = 530
-PAN     = 1400   # px totales que recorre el plano más cercano
+HORIZON = 500   # px desde arriba
 
-P_SKY   = 0.05
-P_MFAR  = 0.15
-P_MMID  = 0.38
-P_DST   = 0.68
-P_FORE  = 1.00
-
-def lw(f): return 1920 + int(PAN * f) + 60
+# Deriva de cámara muy sutil — como trípode en viento ligero
+PAN    = 260
+P_SKY  = 0.012
+P_MFAR = 0.065
+P_MMID = 0.18
+P_DST  = 0.52
+P_FORE = 0.85
 
 rng = np.random.default_rng(42)
 
-# ── Paleta cinemática — hora dorada ──────────────────────────────────────────
-# Cielo
-C_SKY_TOP   = ( 18,  42,  98)   # azul noche profundo
-C_SKY_MID   = ( 68, 120, 185)   # azul cielo
-C_SKY_WARM  = (185, 135,  72)   # naranja dorado en horizonte
-C_SKY_HOR   = (235, 175, 100)   # horizonte brillante
-# Montañas lejanas (silhouette azulada por perspectiva atmosférica)
-C_MFA_1     = (110,  95, 118)   # púrpura azulado, muy lejano
-C_MFA_2     = (130, 108, 120)
-C_MFA_3     = (148, 122, 118)
-# Montañas medias (cálidas, iluminadas)
-C_MMD_L     = (172, 122,  78)   # cara iluminada
-C_MMD_D     = (105,  72,  48)   # cara en sombra
-C_MMD_R     = (148,  98,  60)   # roca media
-# Desierto
-C_DST_H     = (195, 158, 100)   # arena lejana
-C_DST_N     = (210, 170, 108)   # arena cercana
-C_DST_S     = (155, 120,  68)   # sombra en arena
-# Cactos — orgánicos, verde militar
-C_CAC_D     = ( 42,  62,  32)
-C_CAC_M     = ( 58,  85,  44)
-C_CAC_L     = ( 78, 110,  58)
-C_CAC_HL    = (105, 145,  78)   # highlight solar
-# Aves — silueta oscura
-C_BIRD      = ( 22,  18,  14)
+def lw(f): return W + int(PAN * f) + 40
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── Paleta fotográfica — atardecer Sonorense ──────────────────────────────────
+SKY_ZEN  = np.array([ 14,  30,  80], np.float32)   # azul índigo en cenit
+SKY_MED  = np.array([ 52,  95, 158], np.float32)   # azul cerúleo
+SKY_HAZY = np.array([148, 130, 162], np.float32)   # lila-gris prehorizonte
+SKY_WARM = np.array([210, 152,  88], np.float32)   # melocotón dorado
+SKY_HOR  = np.array([245, 198, 118], np.float32)   # horizonte brillante
+
+MFA_LIT  = np.array([142, 132, 155], np.float32)   # mont. lejana iluminada
+MFA_BASE = np.array([115, 106, 128], np.float32)
+MFA_SHD  = np.array([ 84,  76, 100], np.float32)
+
+MMD_LIT  = np.array([200, 148,  88], np.float32)   # mont. media iluminada
+MMD_BASE = np.array([148, 108,  64], np.float32)   # terracota
+MMD_SHD  = np.array([ 88,  58,  36], np.float32)   # sombra oscura
+
+DST_FAR  = np.array([198, 168, 112], np.float32)   # arena lejana (pálida)
+DST_NEAR = np.array([182, 145,  80], np.float32)   # arena cercana (ocre)
+
+CAC_D  = ( 32,  50,  24)
+CAC_M  = ( 48,  72,  36)
+CAC_L  = ( 65,  98,  50)
+CAC_HL = ( 88, 125,  65)
+
+# ── Utilidades ────────────────────────────────────────────────────────────────
 
 def lerp(a, b, t):
     t = max(0.0, min(1.0, t))
-    return tuple(int(a[i] + (b[i]-a[i])*t) for i in range(3))
+    return tuple(int(a[i] + (b[i] - a[i]) * t) for i in range(len(a)))
 
-def lerp3(a, b, c, t):
-    if t < 0.5: return lerp(a, b, t*2)
-    return lerp(b, c, (t-0.5)*2)
+def make_ridge(width, height_range, seed=0):
+    """Ridge fractal multi-octava con interpolación lineal suavizada."""
+    r2 = np.random.default_rng(seed)
+    y  = np.zeros(width, dtype=np.float64)
+    for k in range(7):
+        n   = max(4, width >> k)
+        amp = height_range / (2.0 ** (k * 0.85))
+        pts = r2.random(n) * amp
+        xs  = np.linspace(0, width - 1, n)
+        y  += np.interp(np.arange(width), xs, pts)
+    y -= y.min()
+    y  = y / (y.max() + 1e-6) * height_range
+    kernel = np.ones(11) / 11
+    y = np.convolve(y, kernel, mode="same")
+    return y
 
-def hgrad(arr, y0, y1, c0, c1):
-    for y in range(y0, y1):
-        t = (y-y0)/max(y1-y0-1,1)
-        arr[y] = lerp(c0, c1, t)
+def _paint_ridge(arr, ridge_y, y_bot, c_lit, c_base, c_shd, fog, atm, sun_dir=1.0):
+    """
+    Pinta una cordillera en arr (H, W, 4) float32 con sombreado de pendiente.
+    Painter's algorithm: sobreescribe lo que haya debajo.
+    """
+    IH, LW = arr.shape[:2]
+    y_bot = min(int(y_bot), IH)
 
-def add_noise(img_arr, intensity=8, seed=0):
-    rng2 = np.random.default_rng(seed)
-    noise = rng2.integers(-intensity, intensity+1, img_arr.shape, dtype=np.int16)
-    return np.clip(img_arr.astype(np.int16) + noise, 0, 255).astype(np.uint8)
+    dx     = np.gradient(ridge_y)
+    dx_max = max(np.percentile(np.abs(dx), 88), 0.4)
+    light  = np.clip(0.5 + dx * sun_dir / (dx_max * 2.5), 0.05, 0.95)
 
-def blur_layer(img, radius):
-    return img.filter(ImageFilter.GaussianBlur(radius))
+    ri  = ridge_y.astype(np.int32).clip(0, IH - 1)
+    yy  = np.arange(IH, dtype=np.float32)[:, np.newaxis]   # (IH, 1)
+    ri2 = ri.astype(np.float32)[np.newaxis, :]              # (1, LW)
 
-def smooth_ridge(x_start, x_end, y_base, amplitude, freq, seed=0, n_pts=60):
-    """Genera una silueta de montaña orgánica con Perlin-like noise."""
-    rng2 = np.random.default_rng(seed)
-    xs = np.linspace(x_start, x_end, n_pts)
-    # Suma de sinusoides con frecuencias y fases aleatorias
-    ys = np.zeros(n_pts)
-    for k in range(1, 6):
-        phase = rng2.uniform(0, 2*math.pi)
-        amp   = amplitude / (k**1.3)
-        ys   += amp * np.sin(xs * freq * k + phase)
-    # Normalizar y centrar en y_base
-    ys = y_base - (ys - ys.min())
-    # Suavizar con media móvil
-    kernel = np.ones(5)/5
-    ys = np.convolve(ys, kernel, mode='same')
-    pts = list(zip(xs.astype(int), ys.astype(int)))
-    pts += [(x_end, y_base + 20), (x_start, y_base + 20)]
-    return pts
+    in_mnt = (yy >= ri2) & (yy < y_bot)                    # (IH, LW)
+    span   = np.maximum(1.0, float(y_bot) - ri2)
+    t      = np.clip((yy - ri2) / span, 0.0, 1.0)
+
+    lf    = light[np.newaxis, :, np.newaxis]
+    col_l = c_lit  + t[:, :, np.newaxis] * (c_base - c_lit)
+    col_s = c_shd  + t[:, :, np.newaxis] * (c_base - c_shd)
+    col   = col_l * lf + col_s * (1.0 - lf)
+    col   = col * (1.0 - atm) + fog * atm
+
+    mask          = in_mnt[:, :, np.newaxis]
+    arr[:, :, :3] = np.where(mask, col, arr[:, :, :3])
+    arr[:, :,  3] = np.where(in_mnt, 255.0, arr[:, :, 3])
 
 # ── Capa: Cielo ───────────────────────────────────────────────────────────────
 
 def make_sky():
     LW  = lw(P_SKY)
-    arr = np.zeros((HORIZON, LW, 3), dtype=np.uint8)
-    row = np.zeros((HORIZON, 3), dtype=np.uint8)
-    for y in range(HORIZON):
-        t = y / HORIZON
-        row[y] = lerp3(C_SKY_TOP, C_SKY_MID, C_SKY_WARM, t)
-    arr[:] = row[:, np.newaxis, :]
-    # Glow horizontal cálido en el horizonte (izq→der varía un poco)
-    for x in range(LW):
-        tx = x / LW
-        glow_int = 0.12 * math.sin(tx * math.pi)
-        for y in range(int(HORIZON*0.65), HORIZON):
-            ty   = (y - HORIZON*0.65) / (HORIZON*0.35)
-            c    = arr[y, x].astype(float)
-            warm = np.array(C_SKY_HOR, dtype=float)
-            arr[y, x] = np.clip(c + (warm-c)*ty*glow_int*2, 0, 255).astype(np.uint8)
-    arr = add_noise(arr, 5, seed=1)
-    img = Image.fromarray(arr, "RGB")
-    return img
+    yy  = np.arange(HORIZON, dtype=np.float32) / HORIZON   # [0, 1]
+
+    # Gradiente de 4 paradas usando umbrales
+    col = np.zeros((HORIZON, 3), dtype=np.float32)
+    s   = [0.0, 0.35, 0.65, 0.85, 1.0]
+    stops = [SKY_ZEN, SKY_MED, SKY_HAZY, SKY_WARM, SKY_HOR]
+    for i in range(4):
+        mask = (yy >= s[i]) & (yy < s[i+1])
+        t_seg = (yy[mask] - s[i]) / (s[i+1] - s[i])
+        col[mask] = stops[i] + t_seg[:, np.newaxis] * (stops[i+1] - stops[i])
+    col[yy >= s[4]] = SKY_HOR
+
+    sky_arr = np.broadcast_to(col[:, np.newaxis, :], (HORIZON, LW, 3)).copy()
+
+    # Suave resplandor solar en horizonte (columna ~28% desde la izquierda)
+    sun_x  = int(LW * 0.28)
+    glow_x = np.exp(-((np.arange(LW) - sun_x) ** 2) / (LW * 0.035) ** 2)
+    glow_y = np.clip(1.0 - yy / 0.25, 0, 1) ** 2                      # solo en zona baja
+    glow   = glow_x[np.newaxis, :] * glow_y[:, np.newaxis]             # (HORIZON, LW)
+    sky_arr[:, :, 0] += glow * 28
+    sky_arr[:, :, 1] += glow * 14
+
+    # Finas estrías de cirros (ruido horizontal suavizado, solo en el tercio superior)
+    cirrus_h = HORIZON // 3
+    base_noise = rng.random((cirrus_h // 8, LW // 4))
+    cirrus = np.array(
+        Image.fromarray((base_noise * 255).astype(np.uint8)).resize((LW, cirrus_h), Image.BICUBIC)
+    ) / 255.0 - 0.5
+    cirrus_mask = (1.0 - np.arange(cirrus_h, dtype=np.float32) / cirrus_h)[:, np.newaxis]
+    sky_arr[:cirrus_h] += cirrus[:, :, np.newaxis] * 14 * cirrus_mask[:, :, np.newaxis]
+
+    # Ruido de textura fotográfica
+    tex = rng.integers(-5, 6, (HORIZON, LW, 3), dtype=np.int16)
+    sky_arr = np.clip(sky_arr + tex, 0, 255).astype(np.uint8)
+
+    return Image.fromarray(sky_arr, "RGB")
 
 # ── Capa: Montañas lejanas ────────────────────────────────────────────────────
 
 def make_mfar():
     LW  = lw(P_MFAR)
-    img = Image.new("RGBA", (LW, HORIZON+10), (0,0,0,0))
-    d   = ImageDraw.Draw(img)
-    # 3 cordilleras con siluetas diferentes, distancias distintas
-    ridges = [
-        # (x_start, x_end, y_base, amplitude, freq, seed, color_top, color_bot)
-        (  -80, LW+80, HORIZON-10, 95, 0.0028, 10, C_MFA_1, C_MFA_2),
-        ( -120, LW+120,HORIZON+5,  70, 0.0038, 20, C_MFA_2, C_MFA_3),
-        (  -60, LW+60, HORIZON+12, 50, 0.0055, 30, C_MFA_3, C_MMD_R),
+    IH  = HORIZON + 25
+    arr = np.zeros((IH, LW, 4), dtype=np.float32)
+    fog = SKY_HOR.copy()
+
+    configs = [
+        # y_base, h_range, seed, atm_fog
+        (HORIZON - 35,  92, 10, 0.72),
+        (HORIZON -  8,  72, 20, 0.55),
+        (HORIZON + 15,  52, 30, 0.38),
     ]
-    for xs, xe, yb, amp, freq, seed, ct, cb in ridges:
-        pts = smooth_ridge(xs, xe, yb, amp, freq, seed)
-        # Relleno con gradiente vertical (truco: pintar en dos pasos)
-        d.polygon(pts, fill=ct)
-    # Blur atmosférico fuerte (muy lejos)
-    img = img.filter(ImageFilter.GaussianBlur(3.5))
-    # Añadir un velo de niebla atmosférica
-    fog = Image.new("RGBA", (LW, HORIZON+10), (C_SKY_HOR[0], C_SKY_HOR[1], C_SKY_HOR[2], 55))
-    img = Image.alpha_composite(img, fog)
+    for y_base, h_rng, seed, atm in configs:
+        ridge = make_ridge(LW, h_rng, seed)
+        _paint_ridge(arr, y_base - ridge, y_base + 8, MFA_LIT, MFA_BASE, MFA_SHD, fog, atm, 1.2)
+
+    img = Image.fromarray(arr.clip(0, 255).astype(np.uint8), "RGBA")
+    img = img.filter(ImageFilter.GaussianBlur(4.5))
     return img
 
 # ── Capa: Montañas medias ─────────────────────────────────────────────────────
 
 def make_mmid():
     LW  = lw(P_MMID)
-    img = Image.new("RGBA", (LW, HORIZON+120), (0,0,0,0))
-    d   = ImageDraw.Draw(img)
-    # Cordillera principal con textura
-    ridges = [
-        ( -80, LW+80, HORIZON+10,  130, 0.0022, 40, C_MMD_D),
-        ( -60, LW+60, HORIZON+30,  100, 0.0032, 50, C_MMD_R),
+    IH  = HORIZON + 115
+    arr = np.zeros((IH, LW, 4), dtype=np.float32)
+    fog = SKY_HOR.copy()
+
+    configs = [
+        (HORIZON + 18, 145, 40, 0.18),
+        (HORIZON + 50, 105, 50, 0.08),
     ]
-    for xs, xe, yb, amp, freq, seed, col in ridges:
-        pts = smooth_ridge(xs, xe, yb, amp, freq, seed)
-        d.polygon(pts, fill=col)
-    # Detalle iluminado en crestas — superponemos una cordillera más alta y más clara
-    pts_lit = smooth_ridge(-80, LW+80, HORIZON+10, 130, 0.0022, 40)
-    # Simular cara iluminada: dibujar versión desplazada 2px arriba en color claro
-    pts_shifted = [(x, y-3) for x,y in pts_lit[:-2]] + pts_lit[-2:]
-    d.polygon(pts_shifted, fill=(*C_MMD_L, 160))
-    # Textura de roca con ruido sobre la capa
-    arr = np.array(img)
-    mask = arr[:,:,3] > 0
-    noise = rng.integers(-14, 14, arr[:,:,:3].shape, dtype=np.int16)
-    arr[:,:,:3] = np.clip(arr[:,:,:3].astype(np.int16) + noise*mask[:,:,np.newaxis], 0, 255).astype(np.uint8)
-    img = Image.fromarray(arr, "RGBA")
-    img = img.filter(ImageFilter.GaussianBlur(1.2))
+    for y_base, h_rng, seed, atm in configs:
+        ridge = make_ridge(LW, h_rng, seed)
+        _paint_ridge(arr, y_base - ridge, y_base + 10, MMD_LIT, MMD_BASE, MMD_SHD, fog, atm, 1.0)
+
+    # Textura de roca sobre los píxeles de montaña
+    mask_3d = arr[:, :, 3:4] / 255.0
+    rock_noise = rng.integers(-16, 17, (IH, LW, 3), dtype=np.int16)
+    arr[:, :, :3] = np.clip(arr[:, :, :3] + rock_noise * mask_3d * 0.65, 0, 255)
+
+    img = Image.fromarray(arr.clip(0, 255).astype(np.uint8), "RGBA")
+    img = img.filter(ImageFilter.GaussianBlur(0.9))
     return img
 
 # ── Capa: Desierto ────────────────────────────────────────────────────────────
 
 def make_desert():
     LW  = lw(P_DST)
-    arr = np.zeros((H-HORIZON, LW, 3), dtype=np.uint8)
-    # Gradiente base
-    for y in range(H-HORIZON):
-        t = y / (H-HORIZON)
-        arr[y] = lerp(C_DST_H, C_DST_N, t)
-    # Textura de arena — noise de baja frecuencia
-    for scale in [80, 40, 20]:
-        freq_x = 1.0/scale; freq_y = 1.0/(scale*0.5)
-        xx = np.arange(LW)
-        yy = np.arange(H-HORIZON)
-        # Suma de sinusoides para simular arena
-        wave_x = np.sin(xx * freq_x * rng.uniform(0.8,1.2) + rng.uniform(0, 6.28))
-        wave_y = np.sin(yy * freq_y * rng.uniform(0.8,1.2) + rng.uniform(0, 6.28))
-        texture = np.outer(wave_y, wave_x)  # (H, LW)
-        intensity = 6 if scale==80 else (4 if scale==40 else 2)
-        arr = np.clip(arr.astype(np.int16) + (texture[:,:,np.newaxis]*intensity).astype(np.int16), 0, 255).astype(np.uint8)
-    # Ruido granular fino
-    arr = add_noise(arr, 10, seed=2)
-    # Sombras de piedras — manchas oscuras irregulares
+    DH  = H - HORIZON + 25
+
+    yy  = np.arange(DH, dtype=np.float32)[:, np.newaxis] / DH
+    arr = (DST_FAR + yy * (DST_NEAR - DST_FAR)).astype(np.float32)
+    arr = np.broadcast_to(arr[:, np.newaxis, :], (DH, LW, 3)).copy()
+
+    # Textura de arena multi-escala
+    for scale, amp in [(96, 9), (48, 6), (24, 4), (12, 2.5), (6, 1.5)]:
+        gh = max(3, DH // scale)
+        gw = max(3, LW // scale)
+        n  = rng.random((gh, gw))
+        n_full = np.array(
+            Image.fromarray((n * 255).astype(np.uint8)).resize((LW, DH), Image.BICUBIC)
+        ) / 255.0 - 0.5
+        arr += n_full[:, :, np.newaxis] * amp
+
+    # Perspectiva atmosférica: horizonte más pálido
+    atm   = np.clip((1.0 - yy * 2.8), 0, 1) * 0.48  # (DH, 1)
+    arr   = arr * (1.0 - atm[:, :, np.newaxis]) + SKY_HOR * atm[:, :, np.newaxis]
+
+    # Duna diagonal sutil en tercio cercano
+    xx    = np.arange(LW, dtype=np.float32)[np.newaxis, :]
+    dune  = np.sin(xx * 0.0032 + yy * 0.012) * 5.5 * (yy > 0.5)
+    arr  += dune[:, :, np.newaxis]
+
+    tex   = rng.integers(-7, 8, (DH, LW, 3), dtype=np.int16)
+    arr   = np.clip(arr + tex, 0, 255).astype(np.uint8)
+
+    # Piedras pequeñas en franja cercana
     img = Image.fromarray(arr, "RGB")
     d   = ImageDraw.Draw(img)
-    rock_positions = [
-        (310, 185, 95, 38), (670, 265, 68, 26), (1220, 148, 105, 42),
-        (1520, 238, 82, 32), (820, 338, 125, 48), (1770, 308, 78, 30),
-        (155, 385, 110, 36), (1065, 388, 88, 32), (2120, 205, 92, 36),
-        (2450, 285, 72, 28), (2720, 158, 98, 40), (3020, 318, 84, 32),
-        (450, 480, 60, 20),  (900, 540, 75, 24),  (1400, 460, 55, 18),
-    ]
-    for rx, ry, rw, rh in rock_positions:
-        # Sombra
-        d.ellipse([rx, ry, rx+rw, ry+rh], fill=C_DST_S)
-        # Roca encima (más clara)
-        inset = 5
-        base = lerp(C_DST_H, C_DST_N, min(ry/(H-HORIZON),1))
-        rock_col = lerp(base, (90,70,45), 0.55)
-        d.ellipse([rx+inset, ry+inset//2, rx+rw-inset, ry+rh-inset//2], fill=rock_col)
-        # Highlight solar en esquina superior izquierda
-        hl_col = lerp(rock_col, (220, 185, 140), 0.4)
-        d.ellipse([rx+inset+3, ry+inset//2+2,
-                   rx+rw-inset-rw//3, ry+rh//2], fill=hl_col)
-    img = img.filter(ImageFilter.GaussianBlur(0.5))
+    rock_r = np.random.default_rng(7)
+    for _ in range(28):
+        rx = int(rock_r.uniform(0, LW))
+        ry = int(rock_r.uniform(DH * 0.62, DH - 10))
+        rw = int(rock_r.uniform(14, 55))
+        rh = int(rock_r.uniform(8, 24))
+        base_t = ry / DH
+        rock_c = tuple(int(DST_FAR[i] + (DST_NEAR[i] - DST_FAR[i]) * base_t * 0.6) for i in range(3))
+        shd_c  = tuple(max(0, c - 35) for c in rock_c)
+        d.ellipse([rx, ry, rx+rw, ry+rh], fill=shd_c)
+        d.ellipse([rx+3, ry+2, rx+rw-3, ry+rh-2], fill=rock_c)
+        hl = tuple(min(255, c + 28) for c in rock_c)
+        d.ellipse([rx+4, ry+3, rx+rw//2, ry+rh//2], fill=hl)
+
+    img = img.filter(ImageFilter.GaussianBlur(0.4))
     return img
 
-# ── Capa: Cactos orgánicos ────────────────────────────────────────────────────
+# ── Capa: Cactos (silueta fotorrealista) ──────────────────────────────────────
 
-def _cactus_segment(d, cx, y_top, y_bot, r, col_d, col_m, col_l, col_hl):
-    """Segmento cilíndrico de cactus — ancho 2r, con gradiente lateral."""
-    steps = max(r*2, 4)
+def _seg(d, cx, y_top, y_bot, r, cd, cm, cl, chl):
+    steps = max(r * 2, 4)
     for i in range(steps):
         x = cx - r + i
-        t = i / (steps-1)
-        # Gradiente lateral: oscuro-medio-claro-medio-oscuro (curvatura)
-        if t < 0.3:    c = lerp(col_d, col_m, t/0.3)
-        elif t < 0.55: c = lerp(col_m, col_l, (t-0.3)/0.25)
-        elif t < 0.7:  c = lerp(col_l, col_hl, (t-0.55)/0.15)
-        elif t < 0.8:  c = lerp(col_hl, col_l, (t-0.7)/0.1)
-        else:          c = lerp(col_l, col_d, (t-0.8)/0.2)
+        t = i / (steps - 1)
+        if   t < 0.28: c = lerp(cd,  cm,  t / 0.28)
+        elif t < 0.54: c = lerp(cm,  cl,  (t - 0.28) / 0.26)
+        elif t < 0.72: c = lerp(cl,  chl, (t - 0.54) / 0.18)
+        elif t < 0.82: c = lerp(chl, cl,  (t - 0.72) / 0.10)
+        else:          c = lerp(cl,  cd,  (t - 0.82) / 0.18)
         d.line([(x, y_top), (x, y_bot)], fill=c)
 
-def saguaro_organic(d, cx, base, s=1.0):
-    r_trunk = max(int(24*s), 3)
-    h_trunk = int(255*s)
-    top     = base - h_trunk
+def draw_saguaro(d, cx, base, s=1.0):
+    rt  = max(int(21 * s), 3)
+    ht  = int(235 * s)
+    top = base - ht
+    _seg(d, cx, top, base, rt, CAC_D, CAC_M, CAC_L, CAC_HL)
+    for dx in [-rt // 2, rt // 3]:
+        for y in range(top, base, 13):
+            d.ellipse([cx+dx-1, y, cx+dx+1, y+2], fill=(*CAC_D, 70))
 
-    # Tronco principal
-    _cactus_segment(d, cx, top, base, r_trunk, C_CAC_D, C_CAC_M, C_CAC_L, C_CAC_HL)
-    # Líneas de costilla verticales
-    for dx in [-r_trunk//2, 0, r_trunk//2]:
-        for y in range(top, base, 10):
-            d.ellipse([cx+dx-1, y, cx+dx+1, y+3], fill=(*C_CAC_D, 90))
+    ra   = max(int(13 * s), 2)
+    ay   = top + int(58 * s);  aex  = cx - int(78 * s); atop  = ay - int(82 * s)
+    _seg(d, aex, atop, ay, ra, CAC_D, CAC_M, CAC_L, CAC_HL)
+    for x in range(aex, cx - rt, 5):
+        d.ellipse([x-1, ay-ra, x+1, ay+ra], fill=CAC_M)
 
-    r_arm = max(int(16*s), 2)
-    # Brazo izquierdo
-    ay   = top + int(65*s)
-    aex  = cx - int(85*s)
-    atop = ay - int(90*s)
-    _cactus_segment(d, aex, atop, ay, r_arm, C_CAC_D, C_CAC_M, C_CAC_L, C_CAC_HL)
-    for x in range(aex, cx - r_trunk, 5):
-        d.ellipse([x-1, ay-r_arm, x+1, ay+r_arm], fill=C_CAC_M)
-
-    # Brazo derecho
-    ay2  = top + int(100*s)
-    aex2 = cx + int(78*s)
-    atop2= ay2 - int(75*s)
-    _cactus_segment(d, aex2, atop2, ay2, r_arm, C_CAC_D, C_CAC_M, C_CAC_L, C_CAC_HL)
-    for x in range(cx + r_trunk, aex2, 5):
-        d.ellipse([x-1, ay2-r_arm, x+1, ay2+r_arm], fill=C_CAC_M)
+    ay2  = top + int(93 * s);  aex2 = cx + int(70 * s); atop2 = ay2 - int(68 * s)
+    _seg(d, aex2, atop2, ay2, ra, CAC_D, CAC_M, CAC_L, CAC_HL)
+    for x in range(cx + rt, aex2, 5):
+        d.ellipse([x-1, ay2-ra, x+1, ay2+ra], fill=CAC_M)
 
 def make_cactus():
     LW  = lw(P_FORE)
-    img = Image.new("RGBA", (LW, H), (0,0,0,0))
-    d   = ImageDraw.Draw(img)
+    img = Image.new("RGBA", (LW, H), (0, 0, 0, 0))
+    d   = ImageDraw.Draw(img, "RGBA")
     cacti = [
-        # cx, base, scale
-        ( 490, H-45,  1.30), ( 830, H-75,  0.90), (1130, H-65,  0.72),
-        (1450, H-25,  1.55), (1820, H-55,  1.15), ( 220, H-195, 0.36),
-        ( 690, H-205, 0.31), (1310, H-200, 0.33), (1670, H-210, 0.29),
-        (2110, H-45,  1.25), (2420, H-65,  0.95), (2720, H-35,  1.45),
-        (2210, H-205, 0.34), (2620, H-195, 0.31), (3010, H-50,  1.15),
-        ( 350, H-185, 0.28), (1000, H-190, 0.26), (1850, H-200, 0.30),
+        (480, H-42, 1.28), (820, H-72, 0.88), (1120, H-62, 0.70),
+        (1440, H-22, 1.52), (1810, H-52, 1.12), (220, H-188, 0.34),
+        (680, H-198, 0.30), (1300, H-193, 0.31), (1660, H-203, 0.28),
+        (2100, H-42, 1.23), (2410, H-62, 0.90), (2710, H-32, 1.40),
+        (2200, H-198, 0.32), (2610, H-188, 0.30), (3000, H-48, 1.10),
+        (355, H-182, 0.27), (995, H-188, 0.25), (1840, H-193, 0.28),
     ]
     for cx, base, sc in cacti:
-        saguaro_organic(d, cx, base, sc)
-    # Suavizar bordes ligeramente
-    img = img.filter(ImageFilter.GaussianBlur(0.6))
+        draw_saguaro(d, cx, base, sc)
+    img = img.filter(ImageFilter.GaussianBlur(0.55))
     return img
-
-# ── Nubes cinemáticas — voluminosas con gradiente ────────────────────────────
-
-CLOUDS = [
-    (  150, 108, 380, 100, 0.55, 0.92),
-    (  720, 152, 290,  80, 0.42, 0.85),
-    ( 1230,  72, 340,  92, 0.50, 0.90),
-    ( 1680, 128, 220,  62, 0.35, 0.80),
-    ( -250, 198, 195,  54, 0.28, 0.72),
-    (  510, 230, 155,  44, 0.25, 0.68),
-    ( 1070, 215, 175,  50, 0.30, 0.74),
-    ( 2020, 105, 310,  86, 0.46, 0.88),
-]
-
-def draw_cloud(d, cx, y, w, h, alpha):
-    # Sombra base
-    d.ellipse([cx+w//6, y+int(h*.6), cx+int(w*.88), y+int(h*1.18)],
-              fill=(195, 185, 175))
-    # Cuerpo principal con varios círculos ponderados
-    puffs = [
-        (0,        0,        w,        h,        1.00),
-        (w//5,    -h//3,    int(w*.78),int(h*.82),0.95),
-        (int(w*.52), 0,     int(w*.68),int(h*.74),0.90),
-        (int(w*.74), h//9,  int(w*.40),int(h*.62),0.85),
-        (-w//9,    h//9,    int(w*.38),int(h*.60),0.85),
-        (w//3,    -h//5,    int(w*.50),int(h*.60),0.80),
-    ]
-    for dx, dy, pw, ph, opa in puffs:
-        r = int(245 * alpha * opa)
-        g = int(242 * alpha * opa)
-        b = int(238 * alpha * opa)
-        d.ellipse([cx+dx, y+dy, cx+dx+pw, y+dy+ph], fill=(r,g,b))
-
-# ── Aves orgánicas ────────────────────────────────────────────────────────────
-
-BIRDS = [
-    ( 300,  92, 0.55, 38, 0.00),
-    ( 560,  72, 0.48, 32, 1.20),
-    ( 760, 112, 0.60, 30, 0.60),
-    (1110,  62, 0.45, 36, 2.10),
-    (1360,  88, 0.52, 28, 3.00),
-    ( 910, 132, 0.38, 24, 1.80),
-    ( 210, 148, 0.42, 22, 0.90),
-]
-
-def draw_bird(d, bx, by, ws, phase, f):
-    flap = math.sin(f * 0.18 + phase) * 11
-    # Ala izquierda con curva (2 segmentos)
-    mid_l = (bx - ws//2, by + flap//2)
-    d.line([(bx-ws, by+flap), mid_l],       fill=C_BIRD, width=3)
-    d.line([mid_l,             (bx, by)],    fill=C_BIRD, width=3)
-    # Ala derecha
-    mid_r = (bx + ws//2, by + flap//2)
-    d.line([(bx, by),     mid_r],            fill=C_BIRD, width=3)
-    d.line([mid_r,  (bx+ws, by+flap)],      fill=C_BIRD, width=3)
-
-# ── Grano de película (overlay estático, se añade por frame) ─────────────────
-
-def make_grain():
-    g = rng.integers(0, 22, (H, W), dtype=np.uint8)
-    grain = np.stack([g,g,g], axis=-1)
-    return Image.fromarray(grain, "RGB")
 
 # ── Render ────────────────────────────────────────────────────────────────────
 
 def main():
     print("Construyendo capas...", file=sys.stderr)
-    sky_l   = make_sky()
-    mfar_l  = make_mfar()
-    mmid_l  = make_mmid()
-    dst_l   = make_desert()
-    cact_l  = make_cactus()
-    grain_l = make_grain()
-    print("Capas listas.", file=sys.stderr)
+    sky_l  = make_sky()
+    mfar_l = make_mfar()
+    mmid_l = make_mmid()
+    dst_l  = make_desert()
+    cact_l = make_cactus()
+
+    # Grano de película — array fijo (se añade por frame con offset aleatorio)
+    grain_base = rng.integers(0, 28, (H + 32, W + 32), dtype=np.uint8)
+
+    print("Capas listas. Renderizando frames...", file=sys.stderr)
 
     ffmpeg_cmd = [
         FFMPEG, "-y",
@@ -366,73 +321,64 @@ def main():
     ]
     proc = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
 
+    grain_rng = np.random.default_rng(99)
+
     for f in range(FRAMES):
         if f % 60 == 0:
-            print(f"  {f*100//FRAMES}% — frame {f}/{FRAMES}", file=sys.stderr, flush=True)
+            print(f"  {f * 100 // FRAMES}% — frame {f}/{FRAMES}", file=sys.stderr, flush=True)
 
         t   = f / FRAMES
         pan = int(t * PAN)
 
         frame = Image.new("RGB", (W, H))
 
-        # Cielo
+        # 1. Cielo
         ox = int(pan * P_SKY)
-        frame.paste(sky_l.crop((ox, 0, ox+W, HORIZON)), (0, 0))
+        frame.paste(sky_l.crop((ox, 0, ox + W, HORIZON)), (0, 0))
 
-        # Neblina cálida en horizonte
-        haze = Image.new("RGB", (W, 70))
+        # 2. Neblina en el horizonte (fusiona cielo y desierto)
+        haze = Image.new("RGB", (W, 60))
         hd   = ImageDraw.Draw(haze)
-        for y in range(70):
-            t2 = y/69
-            col = lerp(C_SKY_HOR, C_DST_H, t2)
-            hd.line([(0,y),(W,y)], fill=col)
-        frame.paste(haze.filter(ImageFilter.GaussianBlur(3)), (0, HORIZON-35))
+        for y in range(60):
+            tt  = y / 59
+            c0  = tuple(int(SKY_HOR[i]) for i in range(3))
+            c1  = tuple(int(DST_FAR[i]) for i in range(3))
+            col = lerp(c0, c1, tt)
+            hd.line([(0, y), (W, y)], fill=col)
+        frame.paste(haze.filter(ImageFilter.GaussianBlur(5)), (0, HORIZON - 30))
 
-        # Montañas lejanas
-        ox = int(pan * P_MFAR)
-        mfc = mfar_l.crop((ox, 0, ox+W, HORIZON+10))
-        frame.paste(mfc, (0, 0), mfc)
+        # 3. Montañas lejanas
+        ox   = int(pan * P_MFAR)
+        crop = mfar_l.crop((ox, 0, ox + W, HORIZON + 25))
+        frame.paste(crop, (0, 0), crop)
 
-        # Montañas medias
-        ox = int(pan * P_MMID)
-        mmc = mmid_l.crop((ox, 0, ox+W, HORIZON+120))
-        frame.paste(mmc, (0, 0), mmc)
+        # 4. Montañas medias
+        ox   = int(pan * P_MMID)
+        crop = mmid_l.crop((ox, 0, ox + W, HORIZON + 115))
+        frame.paste(crop, (0, 0), crop)
 
-        # Desierto
-        ox = int(pan * P_DST)
-        frame.paste(dst_l.crop((ox, 0, ox+W, H-HORIZON)), (0, HORIZON))
+        # 5. Desierto
+        ox  = int(pan * P_DST)
+        DH  = H - HORIZON + 25
+        frame.paste(dst_l.crop((ox, 0, ox + W, DH)), (0, HORIZON - 12))
 
-        # Nubes
-        sky_c = Image.new("RGBA", (W, HORIZON), (0,0,0,0))
-        cd    = ImageDraw.Draw(sky_c)
-        ox_sky = int(pan * P_SKY)
-        for x0, y, cw, ch, spd, alpha in CLOUDS:
-            cx = (x0 + f*spd - ox_sky) % (W+cw+200) - cw - 100
-            draw_cloud(cd, int(cx), y, cw, ch, alpha)
-        frame.paste(sky_c, (0, 0), sky_c)
+        # 6. Cactos
+        ox   = int(pan * P_FORE)
+        crop = cact_l.crop((ox, 0, ox + W, H))
+        frame.paste(crop, (0, 0), crop)
 
-        # Aves
-        bird_c = Image.new("RGBA", (W, HORIZON), (0,0,0,0))
-        bd     = ImageDraw.Draw(bird_c)
-        for x0, y, spd, ws, phase in BIRDS:
-            bx = (x0 + f*spd - ox_sky) % (W+150) - 75
-            draw_bird(bd, int(bx), y, ws, phase, f)
-        frame.paste(bird_c, (0, 0), bird_c)
+        # 7. Grano de película (desplazado aleatoriamente por frame)
+        gy = int(grain_rng.integers(0, 32))
+        gx = int(grain_rng.integers(0, 32))
+        g  = grain_base[gy:gy + H, gx:gx + W].astype(np.int16) - 14
+        fa = np.array(frame).astype(np.int16)
+        fa = np.clip(fa + g[:, :, np.newaxis] * 0.28, 0, 255).astype(np.uint8)
 
-        # Cactos primer plano
-        ox = int(pan * P_FORE)
-        cc = cact_l.crop((ox, 0, ox+W, H))
-        frame.paste(cc, (0, 0), cc)
-
-        # Grano de película sutil
-        frame_arr = np.array(frame).astype(np.int16)
-        g_arr     = np.array(grain_l).astype(np.int16) - 11
-        frame_arr = np.clip(frame_arr + g_arr * 0.35, 0, 255).astype(np.uint8)
-
-        # Grading final: leve aumento de saturación y calor
-        final = Image.fromarray(frame_arr, "RGB")
-        final = ImageEnhance.Color(final).enhance(1.18)
-        final = ImageEnhance.Contrast(final).enhance(1.08)
+        # 8. Grading fotográfico: sutil
+        final = Image.fromarray(fa, "RGB")
+        final = ImageEnhance.Color(final).enhance(1.10)      # +10% saturación
+        final = ImageEnhance.Contrast(final).enhance(1.05)   # +5% contraste
+        final = ImageEnhance.Brightness(final).enhance(0.97) # ligeramente más oscuro
 
         buf = io.BytesIO()
         final.save(buf, format="PNG", compress_level=1)
@@ -454,6 +400,7 @@ def main():
         print("FFmpeg error:", stderr.decode(), file=sys.stderr)
         sys.exit(1)
     print(f"\nFondo listo: {OUTPUT}", file=sys.stderr)
+
 
 if __name__ == "__main__":
     main()
