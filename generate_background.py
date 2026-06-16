@@ -186,19 +186,19 @@ def draw_cloud(d, cx, y, w, h, alpha):
 # ── Aves ──────────────────────────────────────────────────────────────────────
 BIRDS_CFG = [
     # (x_start, y, speed, wing_size, phase)
-    (  300,  95, 0.55, 12, 0.00),
-    (  550,  80, 0.48, 10, 1.20),
-    (  750, 110, 0.60,  9, 0.60),
-    ( 1100,  70, 0.45, 11, 2.10),
-    ( 1350,  88, 0.52,  8, 3.00),
-    (  900, 130, 0.38,  7, 1.80),
-    (  200, 145, 0.42,  6, 0.90),
+    (  300,  95, 0.55, 36, 0.00),
+    (  550,  75, 0.48, 30, 1.20),
+    (  750, 115, 0.60, 28, 0.60),
+    ( 1100,  65, 0.45, 34, 2.10),
+    ( 1350,  90, 0.52, 26, 3.00),
+    (  900, 135, 0.38, 22, 1.80),
+    (  200, 150, 0.42, 20, 0.90),
 ]
 
 def draw_bird(d, bx, by, ws, phase, frame):
-    flap = math.sin(frame * 0.18 + phase) * 5
-    d.line([(bx - ws, by + flap), (bx, by)],      fill=BIRD, width=2)
-    d.line([(bx,      by),        (bx + ws, by + flap)], fill=BIRD, width=2)
+    flap = math.sin(frame * 0.18 + phase) * 10
+    d.line([(bx - ws, by + flap), (bx, by)],             fill=BIRD, width=4)
+    d.line([(bx,      by),        (bx + ws, by + flap)], fill=BIRD, width=4)
 
 # ── Render ────────────────────────────────────────────────────────────────────
 
@@ -236,13 +236,6 @@ def main():
             bx = (x0 + f * spd) % (W + 100) - 50
             draw_bird(d, int(bx), y, ws, phase, f)
 
-        # Leve viñeta (bordes oscuros)
-        vig = Image.new("RGB", (W, H), (0, 0, 0))
-        mask = Image.new("L", (W, H), 0)
-        md   = ImageDraw.Draw(mask)
-        md.ellipse([W*0.08, H*0.08, W*0.92, H*0.92], fill=255)
-        mask = mask.filter(ImageFilter.GaussianBlur(120))
-        frame_img = Image.composite(frame_img, vig, mask)
 
         buf = io.BytesIO()
         frame_img.save(buf, format="PNG", compress_level=1)
